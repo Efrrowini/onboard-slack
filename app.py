@@ -4,6 +4,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from groq import Groq
 from rag import load_and_index_handbook, search_handbook
+from tracker import init_db, log_interaction, get_volunteer_stats, detect_topic
 
 load_dotenv()
 
@@ -12,11 +13,10 @@ groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
 # Index handbook on startup
 load_and_index_handbook()
+init_db()
 
 def ask_ai(question):
-    # Get relevant context from ChromaDB
     context = search_handbook(question)
-    
     response = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
@@ -47,6 +47,8 @@ def handle_mention(event, say):
         say(f"Hey <@{user}>! Ask me anything about volunteering at HopeReach. Type `/onboard` to get started!")
         return
     say(f"<@{user}> let me check that for you...")
+    topic = detect_topic(question)
+    log_interaction(user, question, topic)
     answer = ask_ai(question)
     say(
         blocks=[
@@ -127,6 +129,15 @@ def handle_onboard(ack, say, command):
 def handle_mystats(ack, say, command):
     ack()
     user = command["user_id"]
+    stats = get_volunteer_stats(user)
+
+    if not stats:
+        say(f"<@{user}> you haven't asked me anything yet! Type `/onboard` to get started.")
+        return
+
+    topics_text = ", ".join(stats["topics"]) if stats["topics"] else "None yet"
+    recent_text = "\n".join([f"• _{q[0]}_" for q in stats["recent_questions"]]) or "None yet"
+
     say(
         blocks=[
             {
@@ -141,28 +152,35 @@ def handle_mystats(ack, say, command):
                 "fields": [
                     {
                         "type": "mrkdwn",
-                        "text": "*Status:*\nIn Progress 🔄"
+                        "text": f"*Questions Asked:*\n{stats['total_questions']} ❓"
                     },
                     {
                         "type": "mrkdwn",
-                        "text": "*Topics Covered:*\nGetting Started"
+                        "text": f"*Topics Covered:*\n{topics_text}"
                     },
                     {
                         "type": "mrkdwn",
-                        "text": "*Next Step:*\nAttend orientation 📅"
+                        "text": f"*First Active:*\n{stats['first_seen'][:10]} 📅"
                     },
                     {
                         "type": "mrkdwn",
-                        "text": "*Streak:*\n1 day 🔥"
+                        "text": f"*Last Active:*\n{stats['last_active'][:10]} 🕐"
                     }
                 ]
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Recent Questions:*\n{recent_text}"
+                }
             },
             {
                 "type": "context",
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": "💡 Tip: Ask me questions to complete your onboarding!"
+                        "text": "💡 Keep asking questions to complete your onboarding!"
                     }
                 ]
             }
@@ -184,6 +202,8 @@ def handle_message(event, say):
     if event.get("channel_type") == "im":
         question = event.get("text", "")
         if question:
+            topic = detect_topic(question)
+            log_interaction(event["user"], question, topic)
             answer = ask_ai(question)
             say(answer)
 
