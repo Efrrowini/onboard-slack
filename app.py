@@ -4,7 +4,7 @@ from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 from groq import Groq
 from rag import load_and_index_handbook, search_handbook
-from tracker import init_db, log_interaction, get_volunteer_stats, detect_topic
+from tracker import init_db, log_interaction, get_volunteer_stats, detect_topic, get_all_volunteers
 from scheduler import start_scheduler
 
 load_dotenv()
@@ -12,7 +12,6 @@ load_dotenv()
 app = App(token=os.environ["SLACK_BOT_TOKEN"])
 groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
-# Index handbook on startup
 load_and_index_handbook()
 init_db()
 
@@ -38,6 +37,138 @@ CONTEXT:
         max_tokens=500
     )
     return response.choices[0].message.content
+
+@app.event("app_home_opened")
+def handle_app_home(event, client):
+    user = event["user"]
+    stats = get_volunteer_stats(user)
+
+    if not stats:
+        blocks = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": "👋 Welcome to Onboard!"
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*Onboard* is your AI-powered volunteer onboarding assistant for HopeReach NGO.\n\nI help new volunteers get up to speed instantly — no waiting for a coordinator, no digging through documents."
+                }
+            },
+            {
+                "type": "divider"
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*Get started:*\n• Type `/onboard` in any channel\n• Mention `@Onboard` with any question\n• Ask me anything about volunteering at HopeReach!"
+                }
+            },
+            {
+                "type": "divider"
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*What I can help with:*\n• 📋 Getting started as a volunteer\n• 🏥 Program areas and schedules\n• 📜 Policies and procedures\n• 📞 Contact information\n• 📊 Track your onboarding progress"
+                }
+            }
+        ]
+    else:
+        topics_text = ", ".join(stats["topics"]) if stats["topics"] else "None yet"
+        recent_text = "\n".join([f"• _{q[0]}_" for q in stats["recent_questions"]]) or "None yet"
+        topic_count = len(stats["topics"])
+        progress = min(int((topic_count / 4) * 100), 100)
+        progress_bar = "█" * (progress // 10) + "░" * (10 - progress // 10)
+
+        blocks = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": "🌿 Onboard — HopeReach Volunteer Assistant"
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "Welcome back! Here's your onboarding dashboard."
+                }
+            },
+            {
+                "type": "divider"
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*📊 Onboarding Progress*\n`{progress_bar}` {progress}%"
+                }
+            },
+            {
+                "type": "section",
+                "fields": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Questions Asked:*\n{stats['total_questions']} ❓"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Topics Covered:*\n{topic_count}/4"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*First Active:*\n{stats['first_seen'][:10]} 📅"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"*Last Active:*\n{stats['last_active'][:10]} 🕐"
+                    }
+                ]
+            },
+            {
+                "type": "divider"
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Topics Covered:*\n{topics_text}"
+                }
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Recent Questions:*\n{recent_text}"
+                }
+            },
+            {
+                "type": "divider"
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*Ask me anything:*\n• _When is orientation?_\n• _What programs can I join?_\n• _Who do I contact for help?_"
+                }
+            }
+        ]
+
+    client.views_publish(
+        user_id=user,
+        view={
+            "type": "home",
+            "blocks": blocks
+        }
+    )
 
 @app.event("app_mention")
 def handle_mention(event, say):
@@ -138,6 +269,9 @@ def handle_mystats(ack, say, command):
 
     topics_text = ", ".join(stats["topics"]) if stats["topics"] else "None yet"
     recent_text = "\n".join([f"• _{q[0]}_" for q in stats["recent_questions"]]) or "None yet"
+    topic_count = len(stats["topics"])
+    progress = min(int((topic_count / 4) * 100), 100)
+    progress_bar = "█" * (progress // 10) + "░" * (10 - progress // 10)
 
     say(
         blocks=[
@@ -150,6 +284,13 @@ def handle_mystats(ack, say, command):
             },
             {
                 "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Progress:*\n`{progress_bar}` {progress}%"
+                }
+            },
+            {
+                "type": "section",
                 "fields": [
                     {
                         "type": "mrkdwn",
@@ -157,7 +298,7 @@ def handle_mystats(ack, say, command):
                     },
                     {
                         "type": "mrkdwn",
-                        "text": f"*Topics Covered:*\n{topics_text}"
+                        "text": f"*Topics Covered:*\n{topic_count}/4"
                     },
                     {
                         "type": "mrkdwn",
@@ -168,6 +309,13 @@ def handle_mystats(ack, say, command):
                         "text": f"*Last Active:*\n{stats['last_active'][:10]} 🕐"
                     }
                 ]
+            },
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Topics Covered:*\n{topics_text}"
+                }
             },
             {
                 "type": "section",
