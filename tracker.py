@@ -36,20 +36,18 @@ def log_interaction(user_id, question, topic=None):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    # Log the interaction
     c.execute('''
         INSERT INTO interactions (user_id, question, topic)
         VALUES (?, ?, ?)
     ''', (user_id, question, topic))
     
-    # Update or create volunteer record
     c.execute('''
         INSERT INTO volunteers (user_id, total_questions, last_active)
         VALUES (?, 1, ?)
         ON CONFLICT(user_id) DO UPDATE SET
             total_questions = total_questions + 1,
             last_active = ?
-    ''', (user_id, datetime.now(), datetime.now()))
+    ''', (user_id, datetime.now().isoformat(), datetime.now().isoformat()))
     
     conn.commit()
     conn.close()
@@ -59,7 +57,6 @@ def get_volunteer_stats(user_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     
-    # Get volunteer record
     c.execute('''
         SELECT total_questions, first_seen, last_active
         FROM volunteers WHERE user_id = ?
@@ -72,7 +69,6 @@ def get_volunteer_stats(user_id):
     
     total_questions, first_seen, last_active = volunteer
     
-    # Get recent topics
     c.execute('''
         SELECT DISTINCT topic FROM interactions
         WHERE user_id = ? AND topic IS NOT NULL
@@ -80,7 +76,6 @@ def get_volunteer_stats(user_id):
     ''', (user_id,))
     topics = [row[0] for row in c.fetchall()]
     
-    # Get recent questions
     c.execute('''
         SELECT question, timestamp FROM interactions
         WHERE user_id = ?
@@ -112,9 +107,17 @@ def detect_topic(question):
     else:
         return "General"
 
+def get_all_volunteers():
+    """Get all volunteer user IDs"""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT user_id FROM volunteers')
+    volunteers = [row[0] for row in c.fetchall()]
+    conn.close()
+    return volunteers
+
 if __name__ == "__main__":
     init_db()
-    # Test
     log_interaction("U123", "When is orientation?", "Getting Started")
     log_interaction("U123", "What programs are available?", "Programs")
     stats = get_volunteer_stats("U123")

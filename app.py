@@ -5,6 +5,7 @@ from slack_bolt.adapter.socket_mode import SocketModeHandler
 from groq import Groq
 from rag import load_and_index_handbook, search_handbook
 from tracker import init_db, log_interaction, get_volunteer_stats, detect_topic
+from scheduler import start_scheduler
 
 load_dotenv()
 
@@ -208,6 +209,7 @@ def handle_message(event, say):
             say(answer)
 
 if __name__ == "__main__":
+    start_scheduler(app)
     handler = SocketModeHandler(app, os.environ["SLACK_APP_TOKEN"])
     print("Onboard is running...")
     handler.start()
