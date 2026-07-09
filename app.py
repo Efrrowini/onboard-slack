@@ -6,6 +6,7 @@ from groq import Groq
 from rag import load_and_index_handbook, search_handbook
 from tracker import init_db, log_interaction, get_volunteer_stats, detect_topic, get_all_volunteers
 from scheduler import start_scheduler
+from rts import get_workspace_context
 
 load_dotenv()
 
@@ -15,19 +16,21 @@ groq_client = Groq(api_key=os.environ["GROQ_API_KEY"])
 load_and_index_handbook()
 init_db()
 
-def ask_ai(question):
+def ask_ai(question, user=None):
     context = search_handbook(question)
+    workspace_context = get_workspace_context(question)
+
     response = groq_client.chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[
             {
                 "role": "system",
                 "content": f"""You are Onboard, a friendly AI volunteer onboarding assistant for HopeReach NGO.
-Use ONLY the following context from the volunteer handbook to answer questions.
+Use the following context to answer questions accurately and helpfully.
 Keep answers concise, warm, and helpful. If the answer isn't in the context, say so honestly.
 
-CONTEXT:
-{context}"""
+VOLUNTEER HANDBOOK CONTEXT:
+{context}{workspace_context}"""
             },
             {
                 "role": "user",
@@ -181,7 +184,7 @@ def handle_mention(event, say):
     say(f"<@{user}> let me check that for you...")
     topic = detect_topic(question)
     log_interaction(user, question, topic)
-    answer = ask_ai(question)
+    answer = ask_ai(question, user)
     say(
         blocks=[
             {
@@ -196,7 +199,7 @@ def handle_mention(event, say):
                 "elements": [
                     {
                         "type": "mrkdwn",
-                        "text": "📚 Answer sourced from HopeReach Volunteer Handbook"
+                        "text": "📚 Answer sourced from HopeReach Volunteer Handbook + Workspace Context"
                     }
                 ]
             }
@@ -353,7 +356,7 @@ def handle_message(event, say):
         if question:
             topic = detect_topic(question)
             log_interaction(event["user"], question, topic)
-            answer = ask_ai(question)
+            answer = ask_ai(question, event["user"])
             say(answer)
 
 if __name__ == "__main__":
